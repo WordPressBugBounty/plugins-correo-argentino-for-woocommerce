@@ -1,0 +1,9 @@
+tr:has(.wc-hidden-field) {
+    display: none;
+}
+
+.non-interactive {
+  pointer-events: none;
+  background-color: #f0f0f0;
+  cursor: not-allowed;
+}

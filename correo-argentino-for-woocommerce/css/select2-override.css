@@ -1,0 +1,108 @@
+.corrarfo-selection-wrapper .select2-container,
+.corrarfo-select2.select2-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  display: block !important;
+}
+
+.corrarfo-selection-wrapper .select2-container .select2-selection--single,
+.corrarfo-select2.select2-container .select2-selection--single {
+  max-width: 100% !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 38px !important;
+  display: flex !important;
+  align-items: center !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+}
+
+.corrarfo-selection-wrapper .select2-container .select2-selection__rendered,
+.corrarfo-select2.select2-container .select2-selection__rendered {
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  text-align: left !important;
+  text-indent: 0 !important;
+  padding-left: 10px !important;
+  padding-right: 28px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.corrarfo-selection-wrapper .select2-container .select2-selection__arrow,
+.corrarfo-select2.select2-container .select2-selection__arrow {
+  height: 100% !important;
+  top: 0 !important;
+  right: 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.corrarfo-selection-wrapper .select2-container .select2-results__option,
+.corrarfo-select2.select2-container .select2-results__option {
+  font-size: 13px !important;
+  white-space: normal !important;
+  word-wrap: break-word !important;
+  line-height: 1.4 !important;
+  padding: 8px 10px !important;
+}
+
+/* Wrapper to isolate select fields from WooCommerce theme flexbox/grid layout side effects */
+.corrarfo-selection-wrapper {
+  display: block !important;
+  clear: both !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin-top: 10px !important;
+  margin-bottom: 10px !important;
+  box-sizing: border-box !important;
+}
+
+.corrarfo-selection-wrapper div {
+  margin-bottom: 8px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.corrarfo-selection-wrapper div:last-child {
+  margin-bottom: 0 !important;
+}
+
+.correoargentino_province_select,
+.correoargentino_branch_select {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Constrain the WooCommerce shipping method <li> that contains our widget.
+   Without min-width: 0, flex/grid children can overflow their container
+   when long text is rendered inside Select2. */
+ul.woocommerce-shipping-methods > li,
+#shipping_method > li {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* The Select2 container rendered by the library gets style="width:100%" inline.
+   min-width:0 prevents the flex/grid parent (<li>) from expanding to fit content.
+   We do NOT use overflow:hidden here as it would clip the dropdown results list. */
+.corrarfo-selection-wrapper .select2-container {
+  min-width: 0 !important;
+}
+
+.corrarfo-selection-wrapper .select2-selection--single {
+  min-width: 0 !important;
+}

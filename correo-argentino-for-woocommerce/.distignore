@@ -1,0 +1,16 @@
+# Excluir íconos del directorio (van en SVN /assets, no en el ZIP)
+assets/icon-128x128.png
+assets/icon-256x256.png
+
+# Opcional: otros directorios/archivos que no deben ir al ZIP final
+.vscode/
+.github/
+tests/
+*.md
+phpcs.xml
+phpunit.xml
+composer.json
+composer.lock
+node_modules/
+package.json
+package-lock.json
