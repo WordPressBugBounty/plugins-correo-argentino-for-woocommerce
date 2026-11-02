@@ -4,7 +4,7 @@ Tags: woocommerce, shipping, logistics, argentina, correo argentino
 Requires at least: 6.7
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 3.0.8
+Stable tag: 3.0.8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,18 @@ You can offer your customers different shipping methods according to their needs
 
 == Changelog ==
 
+= 3.0.8.1 =
+* Rates Optimization: Implemented in-memory runtime cache and session cache (6-hour TTL) for quotation rates, preventing redundant API calls.
+* Checkout: Allowed manual input in the shipping phone field when branch delivery is selected.
+* Checkout: Fixed WooCommerce crash when switching shipping methods dynamically.
+* Error Handling: Captured cURL, network, and timeout errors on order import, displaying a user-friendly message.
+* Branches: Added request cooldown and graceful fallback messaging for branch retrieval when the API is unavailable.
+* Rates: Preserved shipping method visibility during quoting errors and avoided partial rate caching.
+* Connectivity: Scoped HTTP timeout to Correo Argentino domains and improved network error handling.
+* Auth: Synchronized token timezone handling and throttled renewal retries.
+* Orders: Validated auto-send status, added Import/Reimport action badges, and improved Paq.Ar preimposition error handling.
+* Attribution: Added developer attribution in plugin row meta and admin footer.
+
 = 3.0.8 =
 * Tested up to WordPress 7.1.
 * Street name and street number are sent separately, so shipping labels no longer show the number twice.
@@ -76,6 +88,9 @@ You can offer your customers different shipping methods according to their needs
 * Documentation of external services (endpoints, data flow, and policies).
 
 == Upgrade Notice ==
+
+= 3.0.8.1 =
+Recommended update: checkout focus crash fix, quotation rates caching optimization, phone field editability, and API resilience improvements.
 
 = 3.0.8 =
 Recommended update: shipping label addresses, per-service settings (MiCorreo / Paq.Ar), and compatibility with WordPress 7.1.

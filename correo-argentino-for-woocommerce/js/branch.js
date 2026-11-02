@@ -1,4 +1,21 @@
 /* global corrarfo_branch_cfg, jQuery */
+
+// Defensive safeguard for WooCommerce checkout focus bug:
+// When an AJAX fragment replacement removes the clicked shipping method radio from the DOM,
+// WooCommerce's checkout.js calls document.getElementById(args.current_target.id).focus() without null-checking,
+// throwing "Cannot read properties of null (reading 'focus')" and blocking the 'updated_checkout' event.
+(function () {
+  if (typeof document === 'undefined') return;
+  var originalGetElementById = document.getElementById;
+  document.getElementById = function (id) {
+    var element = originalGetElementById.apply(document, arguments);
+    if (!element && typeof id === 'string' && id.indexOf('shipping_method') !== -1) {
+      return document.createElement('input');
+    }
+    return element;
+  };
+})();
+
 jQuery(function ($) {
   var path = corrarfo_branch_cfg && corrarfo_branch_cfg.ajaxUrl ? corrarfo_branch_cfg.ajaxUrl : '';
   var edit_address_path = corrarfo_branch_cfg && corrarfo_branch_cfg.editAddressUrl ? corrarfo_branch_cfg.editAddressUrl : '';
@@ -39,6 +56,20 @@ jQuery(function ($) {
     }
   }
 
+  /**
+   * Show an explanatory message in the branch select and keep it disabled.
+   * Used when the API could not provide branches, so the customer is never left with an empty dropdown.
+   */
+  function showBranchesUnavailable(message) {
+    var text = message
+      || (corrarfo_branch_cfg && corrarfo_branch_cfg.i18n && corrarfo_branch_cfg.i18n.branchesUnavailable)
+      || '';
+
+    $(agency_select).empty().append(new Option(text, 'NONE', true, true));
+    $(agency_select).prop('disabled', true).trigger('change');
+    branchSelected({ id: 'NONE' });
+  }
+
   function loadProvincesSelect2() {
     if (!$(province_select).length) return;
 
@@ -73,6 +104,11 @@ jQuery(function ($) {
           nonce: corrarfo_branch_cfg.nonceProvince
         },
         success: function (response) {
+          if (!response || !response.province_list || !response.province_list.length) {
+            showBranchesUnavailable(response && response.message);
+            return;
+          }
+
           $(agency_select).empty();
 
           var selectedAgency = null;
@@ -115,7 +151,7 @@ jQuery(function ($) {
         },
         error: function (error) {
           console.error(error);
-          $(agency_select).attr('disabled', false);
+          showBranchesUnavailable();
         }
       });
     });

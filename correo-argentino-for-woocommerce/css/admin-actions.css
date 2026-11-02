@@ -29,3 +29,52 @@
     margin-left: 30px;
 }
 
+/* Order table action badges (Import / Reimport) */
+.wp-list-table td.column-ID .row-actions,
+.wp-list-table td.column-ID .row-actions.visible {
+    position: static !important;
+    left: auto !important;
+    visibility: visible !important;
+}
+
+.wp-list-table .row-actions .ca-order-badge-action {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    text-decoration: none;
+    cursor: pointer;
+    vertical-align: middle;
+    margin-top: 3px;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.wp-list-table .row-actions .ca-order-badge-action:hover,
+.wp-list-table .row-actions .ca-order-badge-action:focus {
+    text-decoration: none;
+}
+
+.wp-list-table .row-actions .ca-order-badge-pending {
+    background-color: #f8dda4;
+    color: #73510d;
+    border: 1px solid #e2c17c;
+}
+
+.wp-list-table .row-actions .ca-order-badge-pending:hover {
+    background-color: #f3d493;
+    color: #5d4107;
+}
+
+.wp-list-table .row-actions .ca-order-badge-imported {
+    background-color: #c6e1c6;
+    color: #2b562b;
+    border: 1px solid #9dc79d;
+}
+
+.wp-list-table .row-actions .ca-order-badge-imported:hover {
+    background-color: #b5d8b5;
+    color: #1e3f1e;
+}
+

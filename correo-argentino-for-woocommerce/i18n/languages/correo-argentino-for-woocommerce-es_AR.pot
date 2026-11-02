@@ -375,3 +375,26 @@ msgstr ""
 msgid "No orders available to export (or all have already been exported)."
 msgstr ""
 
+msgid "Reimport"
+msgstr ""
+
+msgid "Preimpose"
+msgstr ""
+
+msgid "Label"
+msgstr ""
+
+msgid "Developed by %s"
+msgstr ""
+
+
+msgid "We could not load the branches. Please try again in a few moments."
+msgstr ""
+
+msgid "There are no branches available for the selected province."
+msgstr ""
+
+msgid "The order could not be imported. Please try again later."
+msgstr ""
+
+

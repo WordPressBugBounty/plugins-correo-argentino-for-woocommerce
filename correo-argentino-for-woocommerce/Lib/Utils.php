@@ -526,6 +526,70 @@ class Utils
 
         return is_array($data) ? $data : [];
     }
+
+    /**
+     * Formats an API error message, converting technical network/cURL/SSL errors into a user-friendly message.
+     *
+     * @param mixed $message
+     * @param int|null $statusCode
+     * @return string
+     */
+    public static function formatApiErrorMessage($message, ?int $statusCode = null): string
+    {
+        if (empty($message) && ($statusCode === null || $statusCode < 400)) {
+            return '';
+        }
+
+        if (!is_string($message)) {
+            $message = !empty($message) ? (string) $message : '';
+        }
+
+        $trimmed = trim($message);
+
+        $isConnectionError = false;
+
+        $technicalPatterns = [
+            'curl error',
+            'openssl',
+            'ssl routines',
+            'timed out',
+            'timeout',
+            'unexpected eof',
+            'failed to connect',
+            'could not resolve host',
+            'connection refused',
+            'connection reset',
+            'ssl connect error',
+            'network is unreachable',
+            'operation timed out',
+            'empty reply from server',
+            'failed sending data',
+            'internal server error',
+            'bad gateway',
+            'service unavailable',
+            'gateway timeout',
+            'gateway time-out',
+        ];
+
+        foreach ($technicalPatterns as $pattern) {
+            if (stripos($trimmed, $pattern) !== false) {
+                $isConnectionError = true;
+                break;
+            }
+        }
+
+        if (!$isConnectionError && $statusCode !== null && $statusCode >= 500) {
+            if (empty($trimmed) || strlen($trimmed) > 150 || stripos($trimmed, '<html') !== false || stripos($trimmed, '<!doctype') !== false) {
+                $isConnectionError = true;
+            }
+        }
+
+        if ($isConnectionError) {
+            return __('The order could not be imported. Please try again later.', 'correo-argentino-for-woocommerce');
+        }
+
+        return !empty($trimmed) ? $trimmed : __('The order could not be imported. Please try again later.', 'correo-argentino-for-woocommerce');
+    }
 }
 
 // Support for old name

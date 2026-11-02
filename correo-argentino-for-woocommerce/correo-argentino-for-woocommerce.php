@@ -3,7 +3,7 @@
  * Plugin Name: Correo Argentino for WooCommerce
  * Plugin URI: https://www.correoargentino.com.ar/MiCorreo/public/mi-correo
  * Description: Permite a sus compradores realizar envíos a través de Correo Argentino.
- * Version: 3.0.8
+ * Version: 3.0.8.1
  * Requires at least: 6.7
  * Tested up to: 7.1
  * Requires PHP: 7.4
@@ -23,7 +23,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Plugin paths/urls
+// Plugin version and paths/urls
+defined('CORRARFO_VERSION') || define('CORRARFO_VERSION', '3.0.8.1');
 defined('CORRARFO_PLUGIN_FILE') || define('CORRARFO_PLUGIN_FILE', __FILE__);
 defined('CORRARFO_PLUGIN_DIR') || define('CORRARFO_PLUGIN_DIR', plugin_dir_path(__FILE__));
 defined('CORRARFO_PLUGIN_URL') || define('CORRARFO_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -328,6 +329,9 @@ function corrarfo_choose_branch_handler()
             'isCart' => is_cart() ? '1' : '0',
             'nonceBranch' => wp_create_nonce('corrarfo_update_branch'),
             'nonceProvince' => wp_create_nonce('corrarfo_update_province'),
+            'i18n' => [
+                'branchesUnavailable' => __('We could not load the branches. Please try again in a few moments.', 'correo-argentino-for-woocommerce'),
+            ],
         ]);
     }
 }
@@ -471,6 +475,11 @@ function corrarfo_update_province()
         $province_list = CorreoArgentinoBranch::listBranches();
     }
 
+    $branches_failed = class_exists('CorreoArgentinoBranch') && CorreoArgentinoBranch::lastListFailed();
+    $empty_message = $branches_failed
+        ? __('We could not load the branches. Please try again in a few moments.', 'correo-argentino-for-woocommerce')
+        : __('There are no branches available for the selected province.', 'correo-argentino-for-woocommerce');
+
     $response = (count($province_list) > 0)
         ? [
             'data' => 'ok',
@@ -480,6 +489,7 @@ function corrarfo_update_province()
         ]
         : [
             'data' => 'fail',
+            'message' => $empty_message,
             'province_code' => $province_code,
             'province_list' => $province_list,
             'branch_id' => (function_exists('WC') && WC()->session) ? WC()->session->get(CORRARFO_CHOSEN_BRANCH) : null,
@@ -528,6 +538,8 @@ function corrarfo_process_orders()
         $err_body = isset($response['error_body']) ? $response['error_body'] : '';
         $decoded_body = is_string($err_body) ? json_decode($err_body) : null;
         $msg = (is_object($decoded_body) && isset($decoded_body->message)) ? $decoded_body->message : 'Unknown error';
+        $msg = \Corrarfo\Lib\Utils::formatApiErrorMessage($msg);
+        $api_errmsg = \Corrarfo\Lib\Utils::formatApiErrorMessage($api_errmsg);
 
         $data = array(
             'status' => 'fail',
@@ -595,9 +607,12 @@ function corrarfo_on_payment_complete_handler($order_id)
     $service = (new Corrarfo_ServiceFactory())->get();
     $response = $service->registerOrder($order_id);
 
-    if (isset($response) && $response["error"] === true) {
-        $error_body = json_decode($response["error_body"]);
-        $corrarfo_error = $error_body->message;
+    if (isset($response) && !empty($response["error"])) {
+        $error_body = !empty($response["error_body"]) ? json_decode($response["error_body"]) : null;
+        $corrarfo_error = (is_object($error_body) && !empty($error_body->message))
+            ? $error_body->message
+            : (!empty($response['message']) ? $response['message'] : __('Error desconocido al preimponer la orden', 'correo-argentino-for-woocommerce'));
+        $corrarfo_error = \Corrarfo\Lib\Utils::formatApiErrorMessage($corrarfo_error);
         WC_Admin_Notices::add_custom_notice('corrarfo_error', "Error al preimponer la orden: " . $corrarfo_error);
         return false;
     } else {

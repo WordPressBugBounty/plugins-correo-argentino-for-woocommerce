@@ -47,6 +47,22 @@ const CORRARFO_PAQ_AR_API_URL = 'https://api.correoargentino.com.ar/paqar/v1';
 const CORRARFO_PAQ_AR_API_SANDBOX_URL = 'https://apitest.correoargentino.com.ar/paqar/v1';
 const CORRARFO_MI_CORREO_API_URL = 'https://api.correoargentino.com.ar/micorreo/v1';
 const CORRARFO_MI_CORREO_API_SANDBOX_URL = 'https://apitest.correoargentino.com.ar/micorreo/v1';
+
+// Correo Argentino API domain hostnames and network settings
+const CORRARFO_API_DOMAIN_PRODUCTION = 'api.correoargentino.com.ar';
+const CORRARFO_API_DOMAIN_SANDBOX    = 'apitest.correoargentino.com.ar';
+const CORRARFO_API_DOMAIN_MICORREO   = 'micorreo.correoargentino.com.ar';
+const CORRARFO_DEFAULT_API_TIMEOUT   = 15;
+
+// Cooldowns (seconds) that prevent hammering the API (and tripping its WAF) after a failure.
+const CORRARFO_TOKEN_COOLDOWN_SECONDS    = 45;
+const CORRARFO_AGENCIES_COOLDOWN_SECONDS = 25;
+
+const CORRARFO_API_DOMAINS = [
+    CORRARFO_API_DOMAIN_PRODUCTION,
+    CORRARFO_API_DOMAIN_SANDBOX,
+    CORRARFO_API_DOMAIN_MICORREO,
+];
 const CORRARFO_BUSINESS_DETAILS_FORM_URL = 'admin.php?page=wc-settings&tab=shipping&section=correoargentino_shipping_method&form=business';
 
 const CORRARFO_USERNAME_MI_CORREO_PRODUCTION = 'WOOCOMMERCE';

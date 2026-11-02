@@ -29,6 +29,7 @@ function corrarfo_clear_checkout_shipping_state(): void
             if (
                 strpos($session_key, 'rateList_') === 0
                 || strpos($session_key, 'rateListKey_') === 0
+                || strpos($session_key, 'corrarfo_raw_') === 0
             ) {
                 WC()->session->__unset($session_key);
             }

@@ -86,6 +86,11 @@ class PaqArService implements ServicePaqArInterface
         return array_merge($defaultHeaders, $headers);
     }
 
+    /**
+     * Returns the branches list, or false when it could not be loaded.
+     * Branches are never served from stale data: if the API does not answer,
+     * the caller must tell the customer to try again.
+     */
     public function getBranches($query = [])
     {
         $defaultQuery = ["pickup_availability" => 1];
@@ -99,6 +104,12 @@ class PaqArService implements ServicePaqArInterface
             return $cached;
         }
 
+        // A recent failure for this province: do not hit the API again until the cooldown expires.
+        $cooldownKey = 'corrarfo_agencies_cd_paqar_' . md5($this->url . '|' . $provinceCode);
+        if (false !== get_transient($cooldownKey)) {
+            return false;
+        }
+
         $request = wp_remote_get(
             add_query_arg($query, $this->url . '/agencies'),
             [
@@ -107,15 +118,26 @@ class PaqArService implements ServicePaqArInterface
             ]
         );
 
-        if (is_wp_error($request) || wp_remote_retrieve_response_code($request) != 200) {
+        $agencies = null;
+        if (!is_wp_error($request) && 200 === (int) wp_remote_retrieve_response_code($request)) {
+            $agencies = json_decode(wp_remote_retrieve_body($request), true);
+        }
+
+        if (!is_array($agencies)) {
+            set_transient($cooldownKey, 1, CORRARFO_AGENCIES_COOLDOWN_SECONDS);
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'Paq.Ar: Branches request failed for province ' . $provinceCode . ': ' .
+                    (is_wp_error($request)
+                        ? $request->get_error_message()
+                        : 'HTTP ' . wp_remote_retrieve_response_code($request)),
+                    ['source' => 'correoargentino']
+                );
+            }
             return false;
         }
 
-        $agencies = json_decode(wp_remote_retrieve_body($request), true);
-        
-        if (is_array($agencies)) {
-            set_transient($cacheKey, $agencies, 12 * HOUR_IN_SECONDS);
-        }
+        set_transient($cacheKey, $agencies, 12 * HOUR_IN_SECONDS);
 
         return $agencies;
     }
@@ -344,21 +366,80 @@ class PaqArService implements ServicePaqArInterface
         );
 
 
-        if (is_wp_error($request) || wp_remote_retrieve_response_code($request) != 200) {
-            $error_body = json_decode(wp_remote_retrieve_body($request));
-            if (isset($error_body->message)) {
-                $order->update_meta_data(CORRARFO_ORDER_API_ERROR, $error_body->message);
-                $order->save();
+        if (is_wp_error($request)) {
+            $rawErrorMessage = $request->get_error_message();
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'Paq.Ar: Order preimposition request failed: ' . $rawErrorMessage,
+                    ['source' => 'correoargentino']
+                );
             }
 
+            $friendlyMessage = Utils::formatApiErrorMessage($rawErrorMessage);
+            $order->update_meta_data(CORRARFO_ORDER_API_ERROR, $friendlyMessage);
+            $order->save();
+
             return [
-                "error" => true,
-                "error_body" => wp_remote_retrieve_body($request),
+                'error'             => true,
+                'status'            => 500,
+                'message'           => $friendlyMessage,
+                'api_error_message' => $friendlyMessage,
+                'error_body'        => json_encode(['status' => 500, 'message' => $friendlyMessage]),
             ];
         }
-        $response = json_decode(wp_remote_retrieve_body($request), true);
-        $order->update_meta_data(CORRARFO_TRACKING_NUMBER, $response["trackingNumber"]);
-        $order->save();
+
+        $statusCode = (int) wp_remote_retrieve_response_code($request);
+        $rawBody = wp_remote_retrieve_body($request);
+        $decodedBody = json_decode($rawBody, true);
+
+        if ($statusCode !== 200) {
+            $errorMessage = '';
+            if (is_array($decodedBody) && !empty($decodedBody['message'])) {
+                $errorMessage = $decodedBody['message'];
+            } elseif (is_array($decodedBody) && !empty($decodedBody['error'])) {
+                $errorMessage = is_string($decodedBody['error']) ? $decodedBody['error'] : json_encode($decodedBody['error']);
+            } elseif (!empty($rawBody) && is_string($rawBody)) {
+                $errorMessage = wp_strip_all_tags($rawBody);
+            } else {
+                $errorMessage = sprintf(
+                    /* translators: %d: HTTP status code */
+                    __('Paq.Ar API error (HTTP %d)', 'correo-argentino-for-woocommerce'),
+                    $statusCode
+                );
+            }
+
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'Paq.Ar: Order preimposition failed (HTTP ' . $statusCode . '): ' . $errorMessage,
+                    ['source' => 'correoargentino']
+                );
+            }
+
+            $errorMessage = Utils::formatApiErrorMessage($errorMessage, $statusCode);
+
+            $order->update_meta_data(CORRARFO_ORDER_API_ERROR, $errorMessage);
+            $order->save();
+
+            $safeErrorBody = is_array($decodedBody)
+                ? array_merge($decodedBody, ['status' => $statusCode, 'message' => $errorMessage])
+                : ['status' => $statusCode, 'message' => $errorMessage];
+
+            return [
+                'error'             => true,
+                'status'            => $statusCode,
+                'message'           => $errorMessage,
+                'api_error_message' => $errorMessage,
+                'error_body'        => json_encode($safeErrorBody),
+            ];
+        }
+
+        $response = is_array($decodedBody) ? $decodedBody : [];
+        if (!empty($response['trackingNumber'])) {
+            $order->update_meta_data(CORRARFO_TRACKING_NUMBER, $response['trackingNumber']);
+            $order->delete_meta_data(CORRARFO_ORDER_API_ERROR);
+            $order->save();
+        }
+
         return $response;
 
 

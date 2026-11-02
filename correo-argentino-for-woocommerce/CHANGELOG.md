@@ -1,4 +1,17 @@
 # Registro de cambios
+### v3.0.8.1
+- [Optimización API] Reducción drástica de llamadas a la API de cotización mediante caché en memoria runtime y sesión unificada de 6 horas, evitando peticiones duplicadas y redundantes.
+- [Checkout Teléfono] Liberación de modo solo lectura y soporte de input manual en el campo teléfono de envío alternativo al seleccionar retiro en sucursal.
+- [Resiliencia de Red] Captura de errores cURL, timeouts y fallas de red al importar órdenes, mostrando un mensaje amigable y preservando la traza técnica en logs.
+- [Fix Checkout] Safeguard contra el fallo de foco en WooCommerce checkout al cambiar métodos de envío dinámicamente.
+- [Sucursales] Resiliencia y limitación de reintentos (cooldown) al consultar sucursales (/agencies) con mensaje informativo en el checkout ante caídas de API.
+- [Fix Cotización] Se mantiene la visibilidad de métodos de envío ante fallos de cotización con aviso de advertencia y se evita el caché parcial.
+- [Mejora Red] Timeout HTTP acotado exclusivamente a dominios de Correo Argentino y manejo seguro de errores de conexión.
+- [Auth] Sincronización de zona horaria en tokens y limitación de reintentos de renovación.
+- [Órdenes] Validación de estado en envío automático y agregado de badges en acciones de Importar/Reimportar.
+- [Paq.Ar Preimposición] Manejo robusto de errores de red y timeout al preimponer órdenes, registro en logs de WooCommerce y visualización en la tabla de pedidos.
+- [Créditos] Atribución de desarrollo a Aiotek en row meta del listado de plugins y pie de administración.
+
 ### v3.0.6.rc-20250801
 - [Mejora UX] Deshabilitación de campos de login y link de "Crear nueva cuenta" en formularios de Paq.Ar y MiCorreo cuando el usuario ya está conectado.
 - [Mejora UX] Ocultado el botón de "Guardar cambios" mediante CSS en formularios de login.

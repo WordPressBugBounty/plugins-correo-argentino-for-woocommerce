@@ -465,7 +465,7 @@ class OrderTable extends \WP_List_Table
         }
 
         if (is_wp_error($response)) {
-            Utils::message($response->get_error_message(), 'error', true, false);
+            Utils::message(Utils::formatApiErrorMessage($response->get_error_message()), 'error', true, false);
             return;
         }
 
@@ -477,6 +477,7 @@ class OrderTable extends \WP_List_Table
                 $decoded = json_decode((string) $response['error_body'], true);
                 $status = isset($decoded['status']) ? $decoded['status'] : (wp_remote_retrieve_response_code($response['error_body']) ?: 'ERR');
                 $msg = isset($decoded['message']) ? $decoded['message'] : __('Unknown error', 'correo-argentino-for-woocommerce');
+                $msg = Utils::formatApiErrorMessage($msg, is_numeric($status) ? (int) $status : null);
                 $message = '<b>Error ' . esc_html($status) . '</b> ' . esc_html($msg);
                 Utils::message($message, 'error', true, false);
                 return;
@@ -485,6 +486,16 @@ class OrderTable extends \WP_List_Table
             if (isset($response['status']) && (int) $response['status'] !== 200) {
                 $status = (int) $response['status'];
                 $msg = isset($response['message']) ? $response['message'] : __('Unknown error', 'correo-argentino-for-woocommerce');
+                $msg = Utils::formatApiErrorMessage($msg, $status);
+                $message = '<b>Error ' . esc_html($status) . '</b> ' . esc_html($msg);
+                Utils::message($message, 'error', true, false);
+                return;
+            }
+
+            if (!empty($response['error'])) {
+                $status = isset($response['status']) ? $response['status'] : 'ERR';
+                $msg = isset($response['message']) ? $response['message'] : __('Unknown error', 'correo-argentino-for-woocommerce');
+                $msg = Utils::formatApiErrorMessage($msg, is_numeric($status) ? (int) $status : null);
                 $message = '<b>Error ' . esc_html($status) . '</b> ' . esc_html($msg);
                 Utils::message($message, 'error', true, false);
                 return;
@@ -589,7 +600,9 @@ class OrderTable extends \WP_List_Table
                     }
                     return esc_html($tracking . $extraRef);
                 } elseif ($order->get_meta(CORRARFO_ORDER_API_ERROR)) {
-                    return '<label class="error">' . esc_html($order->get_meta(CORRARFO_ORDER_API_ERROR)) . '</label>';
+                    $raw_error = $order->get_meta(CORRARFO_ORDER_API_ERROR);
+                    $formatted_error = Utils::formatApiErrorMessage($raw_error);
+                    return '<label class="error">' . esc_html($formatted_error) . '</label>';
                 }
 
                 return esc_html($baseId . $extraRef);
@@ -688,38 +701,58 @@ class OrderTable extends \WP_List_Table
         $actions = [];
 
         $order = wc_get_order($id);
+        $is_cancelled = $order ? self::statusStartsIn($order->get_status(), 'cancel') : false;
+        $is_imported  = !empty($tracking) || ($order && $order->get_meta('_corrarfo_sent_to_micorreo') === 'yes');
 
-        if (empty($tracking) && !self::statusStartsIn($order->get_status(), 'cancel')) {
+        if (!$is_cancelled) {
             $store_url = wp_nonce_url(
                 add_query_arg(['page' => $page, 'action' => 'store', 'id' => $id], admin_url('admin.php')),
                 'corrarfo_orders_action'
             );
-            $actions['store'] = sprintf(
-                '<a href="%s">%s</a>',
-                esc_url($store_url),
-                $serviceType === CORRARFO_PAQ_AR ? esc_html__('Preimponer', 'correo-argentino-for-woocommerce') : esc_html__('Importar', 'correo-argentino-for-woocommerce')
-            );
-        } else {
-            if (!self::statusStartsIn($order->get_status(), 'cancel') && $serviceType === CORRARFO_PAQ_AR) {
-                $label_url = wp_nonce_url(
-                    add_query_arg(['page' => $page, 'action' => 'label', 'id' => $id], admin_url('admin.php')),
-                    'corrarfo_orders_action'
-                );
-                $actions['label'] = sprintf(
-                    '<a href="%s" target="_blank" rel="noopener">%s</a>',
-                    esc_url($label_url),
-                    esc_html__('Etiqueta', 'correo-argentino-for-woocommerce')
-                );
 
-                $cancel_url = wp_nonce_url(
-                    add_query_arg(['page' => $page, 'action' => 'cancel', 'id' => $id], admin_url('admin.php')),
-                    'corrarfo_cancel_' . $id
-                );
-                $actions['cancel'] = sprintf(
-                    '<a href="%s">%s</a>',
-                    esc_url($cancel_url),
-                    esc_html__('Cancelar', 'correo-argentino-for-woocommerce')
-                );
+            if ($serviceType === CORRARFO_PAQ_AR) {
+                if (!$is_imported) {
+                    $actions['store'] = sprintf(
+                        '<a href="%s" class="ca-order-badge-action ca-order-badge-pending">%s</a>',
+                        esc_url($store_url),
+                        esc_html__('Preimpose', 'correo-argentino-for-woocommerce')
+                    );
+                } else {
+                    $label_url = wp_nonce_url(
+                        add_query_arg(['page' => $page, 'action' => 'label', 'id' => $id], admin_url('admin.php')),
+                        'corrarfo_orders_action'
+                    );
+                    $actions['label'] = sprintf(
+                        '<a href="%s" target="_blank" rel="noopener">%s</a>',
+                        esc_url($label_url),
+                        esc_html__('Label', 'correo-argentino-for-woocommerce')
+                    );
+
+                    $cancel_url = wp_nonce_url(
+                        add_query_arg(['page' => $page, 'action' => 'cancel', 'id' => $id], admin_url('admin.php')),
+                        'corrarfo_cancel_' . $id
+                    );
+                    $actions['cancel'] = sprintf(
+                        '<a href="%s">%s</a>',
+                        esc_url($cancel_url),
+                        esc_html__('Cancel', 'correo-argentino-for-woocommerce')
+                    );
+                }
+            } else {
+                // MiCorreo: show 'Import' (yellow badge) if pending, or 'Reimport' (green badge) if already imported
+                if (!$is_imported) {
+                    $actions['store'] = sprintf(
+                        '<a href="%s" class="ca-order-badge-action ca-order-badge-pending">%s</a>',
+                        esc_url($store_url),
+                        esc_html__('Import', 'correo-argentino-for-woocommerce')
+                    );
+                } else {
+                    $actions['store'] = sprintf(
+                        '<a href="%s" class="ca-order-badge-action ca-order-badge-imported">%s</a>',
+                        esc_url($store_url),
+                        esc_html__('Reimport', 'correo-argentino-for-woocommerce')
+                    );
+                }
             }
         }
 
@@ -730,7 +763,7 @@ class OrderTable extends \WP_List_Table
             isset($item['meta']['_billing_last_name']) ? esc_html($item['meta']['_billing_last_name']) : ''
         );
 
-        return sprintf('%1$s %2$s', $customer, $this->row_actions($actions));
+        return sprintf('%1$s %2$s', $customer, $this->row_actions($actions, true));
     }
 
 
@@ -1103,7 +1136,7 @@ class OrderTable extends \WP_List_Table
                     $tracking = $order->get_meta(CORRARFO_TRACKING_NUMBER);
                     $prefixed_id = $order->get_meta('_corrarfo_prefixed_order_id');
                     $extra_ref = $prefixed_id ? ' / ' . $prefixed_id : '';
-                    $reference = $tracking ? ($tracking . $extra_ref) : ($order->get_meta(CORRARFO_ORDER_API_ERROR) ?: ($order_id . $extra_ref));
+                    $reference = $tracking ? ($tracking . $extra_ref) : (Utils::formatApiErrorMessage($order->get_meta(CORRARFO_ORDER_API_ERROR)) ?: ($order_id . $extra_ref));
                     $dimensions = ($order ? $order->get_meta('_corrarfo_dimensions', true) : '') ?: '-';
                     $weight = $order ? $order->get_meta('_corrarfo_weight', true) : '';
                     $weight = $weight !== '' ? $weight . ' kg' : '-';

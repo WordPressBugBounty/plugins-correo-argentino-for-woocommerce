@@ -21,6 +21,11 @@ class MiCorreoService implements ServiceMiCorreoInterface
     private $authHash;
     private $accessToken;
 
+    /**
+     * Prevents multiple failed login attempts within the same PHP process/request.
+     */
+    private static $renewalFailed = false;
+
     public function __construct()
     {
         $credentials = maybe_unserialize(get_option(CORRARFO_CREDENTIALS));
@@ -51,12 +56,28 @@ class MiCorreoService implements ServiceMiCorreoInterface
             return false;
         }
 
-        $now = new \DateTime('now');
-        $expires = new \DateTime($credentials['expire']);
-        if ($expires < $now) {
+        try {
+            $tz = new \DateTimeZone('America/Argentina/Buenos_Aires');
+            $expires = new \DateTime($credentials['expire'], $tz);
+            $now = new \DateTime('now');
+
+            // 60-second safety buffer to avoid token expiration mid-request
+            if ($expires->getTimestamp() - 60 < $now->getTimestamp()) {
+                return false;
+            }
+            return true;
+        } catch (\Exception $e) {
             return false;
         }
-        return true;
+    }
+
+    /**
+     * Transient key for the cross-request login cooldown.
+     * Scoped by environment URL and credentials so changing either resets it.
+     */
+    private function getLoginCooldownKey(): string
+    {
+        return 'corrarfo_mc_login_cd_' . md5($this->url . '|' . (string) $this->authHash);
     }
 
     /**
@@ -64,6 +85,17 @@ class MiCorreoService implements ServiceMiCorreoInterface
      */
     public function renewToken(): bool
     {
+        if (self::$renewalFailed) {
+            return false;
+        }
+
+        // A recent /token failure (in any request) means we must not hit the API again yet.
+        $cooldownKey = $this->getLoginCooldownKey();
+        if (false !== get_transient($cooldownKey)) {
+            self::$renewalFailed = true;
+            return false;
+        }
+
         $response = $this->login();
         $credentials = Utils::getCredentials();
         if ($response && isset($response['token'])) {
@@ -75,8 +107,12 @@ class MiCorreoService implements ServiceMiCorreoInterface
 
             // Update instance variable for immediate use
             $this->accessToken = $response["token"];
+            self::$renewalFailed = false;
+            delete_transient($cooldownKey);
             return true;
         }
+        self::$renewalFailed = true;
+        set_transient($cooldownKey, 1, CORRARFO_TOKEN_COOLDOWN_SECONDS);
         return false;
     }
 
@@ -93,6 +129,16 @@ class MiCorreoService implements ServiceMiCorreoInterface
                 'headers' => $headers,
             ]
         );
+
+        if (is_wp_error($request)) {
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'MiCorreo: Login request failed: ' . $request->get_error_message(),
+                    ['source' => 'correoargentino']
+                );
+            }
+            return null;
+        }
 
         $response = json_decode(wp_remote_retrieve_body($request), true);
         if (wp_remote_retrieve_response_code($request) != 200) {
@@ -263,29 +309,60 @@ class MiCorreoService implements ServiceMiCorreoInterface
             ]
         );
 
-        $response = json_decode(wp_remote_retrieve_body($request), true);
-
-        if (\Corrarfo\Lib\ServiceOptions::get(CORRARFO_OPTION_AUTOSTATUS_ENABLED, 'no', CORRARFO_MI_CORREO) === 'yes') {
-            $new_status = \Corrarfo\Lib\ServiceOptions::get(CORRARFO_OPTION_AUTOSTATUS_STATUS, '', CORRARFO_MI_CORREO);
-            $valid_statuses = wc_get_order_statuses();
-
-            if (isset($valid_statuses[$new_status])) {
-                $order->update_status($new_status, __('Automatic status change after successful shipment to MiCorreo.', 'correo-argentino-for-woocommerce'));
-            } else {
-                $order->add_order_note(__('The status was not changed. Configured status is invalid.', 'correo-argentino-for-woocommerce'));
+        if (is_wp_error($request)) {
+            $raw_error_message = $request->get_error_message();
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'MiCorreo: Order import request failed: ' . $raw_error_message,
+                    ['source' => 'correoargentino']
+                );
             }
+            $friendly_message = Utils::formatApiErrorMessage($raw_error_message);
+            $order->update_meta_data(CORRARFO_ORDER_API_ERROR, $friendly_message);
+            $order->save();
+            return [
+                'error'             => true,
+                'status'            => 500,
+                'message'           => $friendly_message,
+                'api_error_message' => $friendly_message,
+                'raw_error_message' => $raw_error_message,
+            ];
         }
 
-        $response["status"] = wp_remote_retrieve_response_code($request);
-        if ($response && $response["status"] == 200) {
+        $response = json_decode(wp_remote_retrieve_body($request), true);
+        if (!is_array($response)) {
+            $response = [];
+        }
+
+        $response["status"] = (int) wp_remote_retrieve_response_code($request);
+        if ($response["status"] === 200) {
             $response['reference'] = $extOrderId;
             $order->update_meta_data(CORRARFO_TRACKING_NUMBER, $extOrderId);
             $order->delete_meta_data(CORRARFO_ORDER_API_ERROR);
+
+            // Change order status only upon successful shipment creation
+            if (\Corrarfo\Lib\ServiceOptions::get(CORRARFO_OPTION_AUTOSTATUS_ENABLED, 'no', CORRARFO_MI_CORREO) === 'yes') {
+                $new_status = \Corrarfo\Lib\ServiceOptions::get(CORRARFO_OPTION_AUTOSTATUS_STATUS, '', CORRARFO_MI_CORREO);
+                $valid_statuses = wc_get_order_statuses();
+
+                if (isset($valid_statuses[$new_status])) {
+                    $order->update_status($new_status, __('Automatic status change after successful shipment to MiCorreo.', 'correo-argentino-for-woocommerce'));
+                } else {
+                    $order->add_order_note(__('The status was not changed. Configured status is invalid.', 'correo-argentino-for-woocommerce'));
+                }
+            }
+
             $order->save();
         } else {
-            $order->update_meta_data(CORRARFO_ORDER_API_ERROR, $response['message']);
+            $raw_message = !empty($response['message']) ? $response['message'] : wp_remote_retrieve_body($request);
+            $error_message = Utils::formatApiErrorMessage(
+                !empty($raw_message) ? $raw_message : __('Failed to import order into MiCorreo.', 'correo-argentino-for-woocommerce'),
+                $response["status"]
+            );
+            $order->update_meta_data(CORRARFO_ORDER_API_ERROR, $error_message);
             $order->save();
-            $response['api_error_message'] = $response['message'];
+            $response['message'] = $error_message;
+            $response['api_error_message'] = $error_message;
         }
 
         return $response;
@@ -343,7 +420,23 @@ class MiCorreoService implements ServiceMiCorreoInterface
         $settings = array_merge($baseSettings, $settings);
 
         if (!isset($this->accessToken)) {
-            throw new \Exception('access token no válido o indefinido');
+            // Attempt to renew token once more before giving up
+            $this->renewToken();
+        }
+
+        if (!isset($this->accessToken)) {
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'MiCorreo: Failed to obtain valid access token for rates calculation.',
+                    ['source' => 'correoargentino']
+                );
+            }
+            return [
+                'error'   => true,
+                'status'  => 'error',
+                'message' => 'Unable to authenticate with Correo Argentino API.',
+                'rates'   => []
+            ];
         }
 
         $headers = $this->setHeaders([
@@ -374,12 +467,54 @@ class MiCorreoService implements ServiceMiCorreoInterface
             ]
         );
 
+        if (is_wp_error($request)) {
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'MiCorreo: Rates calculation request failed: ' . $request->get_error_message(),
+                    ['source' => 'correoargentino']
+                );
+            }
+            return [
+                'error'   => true,
+                'status'  => 'error',
+                'message' => $request->get_error_message(),
+                'rates'   => []
+            ];
+        }
+
         $response = json_decode(wp_remote_retrieve_body($request), true);
+        if (!is_array($response)) {
+            $response = [];
+        }
         $response['status'] = wp_remote_retrieve_response_code($request);
         $response['message'] = wp_remote_retrieve_response_message($request);
         return $response;
     }
 
+    /**
+     * Performs the /agencies request with the current access token.
+     *
+     * @param array $query
+     * @return array|\WP_Error
+     */
+    private function requestAgencies(array $query)
+    {
+        return wp_remote_get(
+            add_query_arg($query, $this->url . '/agencies'),
+            [
+                'method' => 'GET',
+                'headers' => $this->setHeaders([
+                    "Authorization" => "Bearer " . $this->accessToken
+                ]),
+            ]
+        );
+    }
+
+    /**
+     * Returns the branches list, or false when it could not be loaded.
+     * Branches are never served from stale data: if the API does not answer,
+     * the caller must tell the customer to try again.
+     */
     public function getBranches($query = [])
     {
         $defaultQuery = ["services" => 'pickup_availability'];
@@ -393,27 +528,50 @@ class MiCorreoService implements ServiceMiCorreoInterface
             return $cached;
         }
 
-        $headers = $this->setHeaders([
-            "Authorization" => "Bearer " . $this->accessToken
-        ]);
-        $request = wp_remote_get(
-            add_query_arg($query, $this->url . '/agencies'),
-            [
-                'method' => 'GET',
-                'headers' => $headers
-            ]
-        );
-
-        if (is_wp_error($request) || wp_remote_retrieve_response_code($request) != 200) {
+        // A recent failure for this province: do not hit the API again until the cooldown expires.
+        $cooldownKey = 'corrarfo_agencies_cd_micorreo_' . md5($this->url . '|' . $provinceCode);
+        if (false !== get_transient($cooldownKey)) {
             return false;
         }
 
-        $body = wp_remote_retrieve_body($request);
-        $response = json_decode($body, true);
-        
-        if (is_array($response)) {
-            set_transient($cacheKey, $response, 12 * HOUR_IN_SECONDS);
+        // Make sure we hold a token before calling the API (renewal is itself guarded by a cooldown).
+        if (empty($this->accessToken)) {
+            $this->renewToken();
         }
+        if (empty($this->accessToken)) {
+            return false;
+        }
+
+        $request = $this->requestAgencies($query);
+
+        // Token rejected by the API: renew once and retry once.
+        if (!is_wp_error($request) && 401 === (int) wp_remote_retrieve_response_code($request)) {
+            $this->accessToken = null;
+            if ($this->renewToken()) {
+                $request = $this->requestAgencies($query);
+            }
+        }
+
+        $response = null;
+        if (!is_wp_error($request) && 200 === (int) wp_remote_retrieve_response_code($request)) {
+            $response = json_decode(wp_remote_retrieve_body($request), true);
+        }
+
+        if (!is_array($response)) {
+            set_transient($cooldownKey, 1, CORRARFO_AGENCIES_COOLDOWN_SECONDS);
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'MiCorreo: Branches request failed for province ' . $provinceCode . ': ' .
+                    (is_wp_error($request)
+                        ? $request->get_error_message()
+                        : 'HTTP ' . wp_remote_retrieve_response_code($request)),
+                    ['source' => 'correoargentino']
+                );
+            }
+            return false;
+        }
+
+        set_transient($cacheKey, $response, 12 * HOUR_IN_SECONDS);
 
         return $response;
     }

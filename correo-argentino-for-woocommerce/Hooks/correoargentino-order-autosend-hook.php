@@ -47,14 +47,25 @@ function corrarfo_handle_auto_send_on_status_change($order_id, $old_status, $new
 
     try {
         $service = new MiCorreoService();
-        $service->registerOrder($order_id);
+        $response = $service->registerOrder($order_id);
 
-        // Mark as sent
-        $order->update_meta_data('_corrarfo_sent_to_micorreo', 'yes');
-        $order->add_order_note(__('Order automatically sent to MiCorreo.', 'correo-argentino-for-woocommerce'));
-        $order->save();
-    } catch (Exception $e) {
+        if (is_array($response) && isset($response['status']) && (int) $response['status'] === 200) {
+            // Mark as sent only when the API successfully imported the order
+            $order->update_meta_data('_corrarfo_sent_to_micorreo', 'yes');
+            $order->add_order_note(__('Order automatically sent to MiCorreo.', 'correo-argentino-for-woocommerce'));
+            $order->save();
+        } else {
+            // Record failure note and do NOT mark as sent so it can be retried once fixed
+            $error_message = !empty($response['message']) ? $response['message'] : __('Failed to import order into MiCorreo.', 'correo-argentino-for-woocommerce');
+            $error_message = \Corrarfo\Lib\Utils::formatApiErrorMessage($error_message);
+            // translators: %s is the error message returned by the API
+            $order->add_order_note(sprintf(__('Error sending order automatically to MiCorreo: %s', 'correo-argentino-for-woocommerce'), $error_message));
+            $order->save();
+        }
+    } catch (\Throwable $e) {
+        $error_message = \Corrarfo\Lib\Utils::formatApiErrorMessage($e->getMessage());
         // translators: %s is the error message returned by the API
-        $order->add_order_note(sprintf(__('Error sending order automatically to MiCorreo: %s', 'correo-argentino-for-woocommerce'), $e->getMessage()));
+        $order->add_order_note(sprintf(__('Error sending order automatically to MiCorreo: %s', 'correo-argentino-for-woocommerce'), $error_message));
+        $order->save();
     }
 }

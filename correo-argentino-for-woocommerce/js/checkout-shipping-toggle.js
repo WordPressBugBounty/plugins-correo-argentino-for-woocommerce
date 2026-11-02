@@ -12,7 +12,7 @@ jQuery(function ($) {
     $('.shipping_address :input:not([type="checkbox"]), .shipping_address textarea').prop('readonly', !!on);
     var $selects = $('.shipping_address select');
     if (on) $selects.addClass('non-interactive'); else $selects.removeClass('non-interactive');
-    $('#shipping_first_name, #shipping_last_name').prop('readonly', false);
+    $('#shipping_first_name, #shipping_last_name, #shipping_phone, input[name="shipping_phone"]').prop('readonly', false);
   }
 
   function prefillFromAccount() {

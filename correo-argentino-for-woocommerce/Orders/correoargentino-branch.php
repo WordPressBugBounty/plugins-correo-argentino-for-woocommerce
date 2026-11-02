@@ -96,10 +96,27 @@ class Branch
 
 
     /**
+     * Whether the last listBranches() call failed to get an answer from the API.
+     *
+     * @var bool
+     */
+    private static $lastListFailed = false;
+
+    /**
+     * True when the last listBranches() call could not load the branches from the API
+     * (as opposed to the province legitimately having no branches).
+     */
+    public static function lastListFailed(): bool
+    {
+        return self::$lastListFailed;
+    }
+
+    /**
      * @return array
      */
     public static function listBranches()
     {
+        self::$lastListFailed = false;
         $provinceCode = WC()->session->get(CORRARFO_CHOSEN_PROVINCE_CODE);
         $product_type = WC()->session->get(CORRARFO_CHOSEN_PRODUCT_TYPE);
     
@@ -117,6 +134,7 @@ class Branch
             ];
     
         $agencies = $service->getBranches($options);
+        self::$lastListFailed = !is_array($agencies);
         $results = [];
     
         if (!empty($agencies) && is_array($agencies)) {

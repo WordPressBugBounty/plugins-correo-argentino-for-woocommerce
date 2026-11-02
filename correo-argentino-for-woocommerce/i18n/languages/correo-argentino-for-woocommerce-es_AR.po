@@ -672,3 +672,23 @@ msgid_plural "%s pending comments"
 msgstr[0] "%s comentario pendiente"
 msgstr[1] "%s comentarios pendientes"
 
+msgid "Reimport"
+msgstr "Reimportar"
+
+msgid "Preimpose"
+msgstr "Preimponer"
+
+msgid "Label"
+msgstr "Etiqueta"
+
+msgid "Developed by %s"
+msgstr "Desarrollado por %s"
+
+msgid "We could not load the branches. Please try again in a few moments."
+msgstr "No pudimos cargar las sucursales. Intentá nuevamente en unos instantes."
+
+msgid "There are no branches available for the selected province."
+msgstr "No hay sucursales disponibles para la provincia seleccionada."
+
+msgid "The order could not be imported. Please try again later."
+msgstr "No se pudo importar la orden. Intentar luego."

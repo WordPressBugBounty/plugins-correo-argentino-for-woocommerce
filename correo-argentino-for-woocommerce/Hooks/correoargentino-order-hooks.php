@@ -123,7 +123,7 @@ add_action('woocommerce_checkout_create_order_line_item', function ($item, $cart
     if ($w <= 0)
         $w = (float) \Corrarfo\Lib\ServiceOptions::get(CORRARFO_OPTION_DEFAULT_WEIGHT, 0);
     if ($w <= 0)
-        $w = 0.1; // kg mínimo
+        $w = 0.1; // minimum kg
 
     $len = (float) $p->get_length();
     if ($len <= 0)
@@ -174,7 +174,7 @@ function corrarfo_on_settings_updated_handler()
             check_admin_referer('woocommerce-settings');
         }
 
-        // ===== Selector de servicio =====
+        // ===== Service selector =====
         if ($form === CORRARFO_SERVICE_SELECTOR) {
             $serviceType = isset($_POST[CORRARFO_SERVICE_TYPE_FIELD])
                 ? sanitize_key(wp_unslash($_POST[CORRARFO_SERVICE_TYPE_FIELD]))
@@ -211,7 +211,7 @@ function corrarfo_on_settings_updated_handler()
             return false;
         }
 
-        // ===== Credenciales: MiCorreo (validación de usuario) =====
+        // ===== Credentials: MiCorreo (user validation) =====
         if ($form === CORRARFO_USER_VALIDATE_MI_CORREO_FORM) {
             if (isset($_POST[CORRARFO_EMAIL_FIELD], $_POST[CORRARFO_PASSWORD_FIELD])) {
                 $settings = Utils::getSettings();
@@ -271,7 +271,7 @@ function corrarfo_on_settings_updated_handler()
             }
         }
 
-        // ===== Credenciales: Paq.Ar =====
+        // ===== Credentials: Paq.Ar =====
         if ($form === CORRARFO_LOGIN_PAQ_AR_FORM) {
             $credentials = Utils::getCredentials();
 
@@ -321,7 +321,7 @@ function corrarfo_on_settings_updated_handler()
             }
         }
 
-        // ===== Crear cuenta (MiCorreo) =====
+        // ===== Create account (MiCorreo) =====
         if ($form === CORRARFO_BUSINESS_MI_CORREO_FORM) {
             $credentials = maybe_unserialize(get_option(CORRARFO_CREDENTIALS));
             $settings = maybe_unserialize(get_option(CORRARFO_SETTINGS));
@@ -383,13 +383,6 @@ function corrarfo_on_settings_updated_handler()
 }
 
 add_action('admin_enqueue_scripts', 'corrarfo_enqueue_admin_scripts');
-
-// Keep this to ensure the request works properly
-add_filter('http_request_timeout', function ($timeout) {
-    return 15;
-});
-
-add_action('http_api_curl', 'corrarfo_set_curl_to_follow');
 
 function corrarfo_varnish_safe_http_headers()
 {

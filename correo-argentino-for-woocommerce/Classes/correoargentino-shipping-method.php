@@ -15,6 +15,23 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
         public $corrarfo_data = [];
         private $generalKey = 0;
 
+        /**
+         * In-memory runtime cache for raw API rates.
+         * Prevents duplicate HTTP requests across multiple shipping method instances
+         * during the same PHP execution lifecycle.
+         *
+         * @var array
+         */
+        private static $runtime_rates_cache = [];
+
+        /**
+         * Lifespan for session-cached quotation rates in seconds (6 hours).
+         * Established based on standard abandoned cart recovery windows (1-4 hours)
+         * allowing customers to finalize orders during the same day without re-querying the API,
+         * while ensuring rates are freshly renewed on subsequent days.
+         */
+        const RATES_CACHE_TTL = 21600;
+
         public function __construct($instance_id = 0)
         {
 
@@ -604,42 +621,74 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
 
         private function fetchRates($service, $postalCode, $dimensions, $settings = null, $instance_id = null)
         {
-            $cache_key = md5(serialize([$postalCode, $dimensions, $settings, 'v2']));
-            $old_key = WC()->session->get('rateListKey_' . $instance_id);
-            if ($old_key != $cache_key) {
-                WC()->session->set('rateList_' . $instance_id, null);
-            }
-
-            $cached = WC()->session->get('rateList_' . $instance_id);
-
-            if ($cached) {
-                return $cached;
-            }
-
-            $rateList = [];
-
             if ('' == $postalCode) {
-                return;
+                return [];
             }
 
-            $ratesHome = $service->getRates($postalCode, 'D', $dimensions, $settings);
+            $normalizedZip = Utils::normalizeZipCode($postalCode);
+            $originZip = isset($settings['zip_code']) ? Utils::normalizeZipCode($settings['zip_code']) : '';
+            // Key based on destination, origin and package dimensions
+            $shared_cache_key = 'rates_' . md5(serialize([$normalizedZip, $originZip, $dimensions, 'v3']));
 
-            $ratesHomeFiltered = [];
+            $ratesHome = null;
+            $ratesAgency = null;
 
-            if (isset($ratesHome["rates"]) && is_array($ratesHome["rates"])) {
-                $ratesHomeFiltered = array_filter($ratesHome["rates"], function ($rate) {
-                    return isset($rate['productName']) && $rate['productName'] !== "Correo Argentino Hoy";
-                });
+            // 1. Check in-memory runtime cache (avoids repeated HTTP calls across shipping instances in same request)
+            if (isset(self::$runtime_rates_cache[$shared_cache_key])) {
+                $cached_raw = self::$runtime_rates_cache[$shared_cache_key];
+                $ratesHome = $cached_raw['home'] ?? null;
+                $ratesAgency = $cached_raw['agency'] ?? null;
             }
 
-            $ratesHome["rates"] = $ratesHomeFiltered;
+            // 2. Check WooCommerce session cache across checkout updates (TTL: 6 hours)
+            if (($ratesHome === null || $ratesAgency === null) && function_exists('WC') && WC()->session) {
+                $session_cached = WC()->session->get('corrarfo_raw_' . $shared_cache_key);
+                if (is_array($session_cached) && isset($session_cached['home']) && isset($session_cached['agency'])) {
+                    $timestamp = (int) ($session_cached['timestamp'] ?? 0);
+                    $last_invalidation = (int) get_option('corrarfo_rates_cache_invalidation_ts', 0);
+                    if ($timestamp > $last_invalidation && (time() - $timestamp) < self::RATES_CACHE_TTL) {
+                        $ratesHome = $session_cached['home'];
+                        $ratesAgency = $session_cached['agency'];
+                        self::$runtime_rates_cache[$shared_cache_key] = $session_cached;
+                    }
+                }
+            }
 
-            $ratesAgency = $service->getRates($postalCode, 'S', $dimensions, $settings);
+            // 3. If not cached or TTL expired, query Correo Argentino API
+            if ($ratesHome === null || $ratesAgency === null) {
+                $ratesHome = $service->getRates($postalCode, 'D', $dimensions, $settings);
+
+                $ratesHomeFiltered = [];
+                if (isset($ratesHome["rates"]) && is_array($ratesHome["rates"])) {
+                    $ratesHomeFiltered = array_filter($ratesHome["rates"], function ($rate) {
+                        return isset($rate['productName']) && $rate['productName'] !== "Correo Argentino Hoy";
+                    });
+                }
+                $ratesHome["rates"] = $ratesHomeFiltered;
+
+                $ratesAgency = $service->getRates($postalCode, 'S', $dimensions, $settings);
+
+                // Cache when valid API responses were received (avoid caching on network error or timeout)
+                $isValidHome = isset($ratesHome['rates']) && is_array($ratesHome['rates']) && empty($ratesHome['error']);
+                $isValidAgency = isset($ratesAgency['rates']) && is_array($ratesAgency['rates']) && empty($ratesAgency['error']);
+
+                if ($isValidHome && $isValidAgency) {
+                    $raw_data = [
+                        'home' => $ratesHome,
+                        'agency' => $ratesAgency,
+                        'timestamp' => time(),
+                    ];
+                    self::$runtime_rates_cache[$shared_cache_key] = $raw_data;
+                    if (function_exists('WC') && WC()->session) {
+                        WC()->session->set('corrarfo_raw_' . $shared_cache_key, $raw_data);
+                    }
+                }
+            }
 
             // Block home rates only while branch pickup is selected and agency rates failed for branch ZIP.
             if ($this->shouldUseBranchPostcode()) {
-                $chosen_branch = WC()->session->get(CORRARFO_CHOSEN_BRANCH);
-                $chosen_branch_zip = WC()->session->get(CORRARFO_CHOSEN_BRANCH_ZIP_CODE);
+                $chosen_branch = (function_exists('WC') && WC()->session) ? WC()->session->get(CORRARFO_CHOSEN_BRANCH) : null;
+                $chosen_branch_zip = (function_exists('WC') && WC()->session) ? WC()->session->get(CORRARFO_CHOSEN_BRANCH_ZIP_CODE) : null;
                 $normalized_postal_code = Utils::normalizeZipCode($postalCode);
                 $normalized_chosen_zip = Utils::normalizeZipCode($chosen_branch_zip);
 
@@ -654,17 +703,18 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
             }
 
             if (!isset($ratesHome["rates"]) || !isset($ratesAgency["rates"])) {
-                return $rateList;
+                return [];
             }
 
             $rates = [
                 "rates" => array_merge($ratesHome["rates"], $ratesAgency["rates"])
             ];
 
+            $rateList = [];
             if (!empty($rates['rates'])) {
                 foreach ($rates['rates'] as $i => $rate) {
-                    if ($rate && $rate['productName']) {
-                        $branchLabel = $rate['deliveredType'] === 'S' ? '_branch' : '';
+                    if ($rate && !empty($rate['productName'])) {
+                        $branchLabel = ($rate['deliveredType'] ?? '') === 'S' ? '_branch' : '';
                         $rateList[] = [
                             "ID" => md5($rate['productName'] . $rate['deliveredType']) . $branchLabel,
                             "serviceName" => $rate['productName'],
@@ -678,8 +728,6 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
                 }
             }
 
-            WC()->session->set('rateList_' . $instance_id, $rateList);
-            WC()->session->set('rateListKey_' . $instance_id, $cache_key);
             return $rateList;
         }
 
@@ -731,15 +779,25 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
                 return [];
             }
 
-            $service = (new Corrarfo_ServiceFactory())->get();
+            try {
+                $service = (new Corrarfo_ServiceFactory())->get();
 
-            $rates = $this->fetchRates(
-                $service,
-                $postalCode,
-                $dimensions,
-                $this->corrarfo_data[$this->instance_id],
-                $this->instance_id
-            );
+                $rates = $this->fetchRates(
+                    $service,
+                    $postalCode,
+                    $dimensions,
+                    $this->corrarfo_data[$this->instance_id],
+                    $this->instance_id
+                );
+            } catch (\Throwable $e) {
+                if (function_exists('wc_get_logger')) {
+                    wc_get_logger()->error(
+                        'Corrarfo_Shipping_Method::calculate_rates failed: ' . $e->getMessage(),
+                        ['source' => 'correoargentino']
+                    );
+                }
+                return [];
+            }
 
             if (!$rates) {
                 return [];
@@ -819,8 +877,11 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
             $ratesArray = $this->calculate_rates($package);
             $metodo_envio = $this->get_option('metodo_envio');
             $tipo_servicio = $this->get_option('tipo_servicio');
+            $key = $tipo_servicio . 'P' . $metodo_envio;
 
-            if (empty($ratesArray)) {
+            // Keep all configured methods visible in checkout; if this specific instance has no quote,
+            // display it with the warning message rather than omitting the option entirely.
+            if (empty($ratesArray) || !isset($ratesArray[$key])) {
                 $is_branch = ($metodo_envio === 'S');
                 $postcode = isset($package['destination']['postcode']) ? $package['destination']['postcode'] : '';
                 
@@ -849,7 +910,6 @@ if (!class_exists('Corrarfo_Shipping_Method')) {
                 return;
             }
 
-            $key = $tipo_servicio . 'P' . $metodo_envio;
             if (isset($ratesArray[$key])) {
                 $rate = $ratesArray[$key];
                 $cartSubtotal = WC()->cart ? WC()->cart->subtotal : 0;
